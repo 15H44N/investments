@@ -1,0 +1,1 @@
+/Users/ishaan/.agents/rules/global/rules.mdc
