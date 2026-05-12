@@ -185,9 +185,9 @@ export const getJsonFromTxt = async (t: string): Promise<InvestmentsData> => {
 
 export const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 
-export const strToCur = num => Math.round((Number(num.replace(',', '')) + Number.EPSILON) * 100) / 100
-export const strToPrice = num => Math.round((Number(num.replace(',', '')) + Number.EPSILON) * 10000) / 10000
-export const strToUnits = num => Math.round((Number(num.replace(',', '')) + Number.EPSILON) * 1000) / 1000
+export const strToCur = num => Math.round((Number(num.replaceAll(',', '')) + Number.EPSILON) * 100) / 100
+export const strToPrice = num => Math.round((Number(num.replaceAll(',', '')) + Number.EPSILON) * 10000) / 10000
+export const strToUnits = num => Math.round((Number(num.replaceAll(',', '')) + Number.EPSILON) * 1000) / 1000
 
 export const getIndexByStartingText = (lines: string[], text: string) => lines.indexOf(lines.filter(line => line.startsWith(text))[0])
 
@@ -225,7 +225,7 @@ export const getTransactions = async (lines: string[]): Promise<Transaction[]> =
   filteredLines.forEach((line, index) => {
     if (line.includes('Folio No:')) {
       [ mfNameFull, folio ] = line.split(" Folio No: ")
-      isin = line.split(' - ISIN : ')[1].split("(")[0].split('Registrar')[0].split(' ').join('').trim()
+      isin = line.split(' - ISIN : ')[1].split("(")[0].split('Registrar')[0].split(' ').join('').trim().slice(0, 12)
 
       if (!isin) {
         console.log('No ISIN found for line:', line)
