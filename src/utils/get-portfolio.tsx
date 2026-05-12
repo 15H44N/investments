@@ -1,6 +1,8 @@
 import { byDateAsc, byTotalCostDesc, stringToColour } from "@/utils/functions";
 import { navHistoryDB } from "@/utils/db";
 import { Transaction, Portfolio } from "@/types/investments";
+import { TaxRules } from "@/utils/tax/TaxRules";
+import { TransactionEnricher } from "@/utils/enricher/TransactionEnricher";
 
 const getLatestPrice = async (schemeCode: string) => {
   const data = await navHistoryDB.get(schemeCode);
@@ -25,7 +27,8 @@ const getPortfolio = async (
   portfolio: Portfolio;
   realisedProfitByDate: RealisedProfitEntry[];
 }> => {
-  const ts = transactions.slice();
+  const enriched = TransactionEnricher.enrich(transactions);
+  const ts = enriched.slice();
   ts.sort(byDateAsc);
   const out: Portfolio = [];
   const realisedProfitByDate: RealisedProfitEntry[] = [];
@@ -39,6 +42,13 @@ const getPortfolio = async (
           price: transaction.price * 10000,
           units: transaction.units * 1000,
           date: new Date(transaction.date),
+          // placeholder values — computed in the second pass below
+          invested: 0,
+          currentValue: 0,
+          profit: 0,
+          gain: 0,
+          capitalGainType: 'STCG' as const,
+          daysHeld: 0,
         });
       } else {
         let units = Math.round(transaction.units * 1000);
@@ -86,17 +96,40 @@ const getPortfolio = async (
             price: transaction.price * 10000,
             units: transaction.units * 1000,
             date: new Date(transaction.date),
+            // placeholder values — computed in the second pass below
+            invested: 0,
+            currentValue: 0,
+            profit: 0,
+            gain: 0,
+            capitalGainType: 'STCG' as const,
+            daysHeld: 0,
           },
         ],
         realisedProfit: 0,
+        // Enriched — computed in the second pass
+        isin: [],
+        folio: [],
+        fundType: transaction.fundType,
+        isDirectPlan: transaction.isDirectPlan,
+        ltcgGain: 0,
+        stcgGain: 0,
+        ltValue: 0,
+        stValue: 0,
       });
     }
   });
+
+  const today = new Date();
 
   for (const o of out) {
     let invested = 0;
     let units = 0;
     o.latestPrice = await getLatestPrice(o.schemeCode);
+
+    // Derived set fields
+    o.isin = [...new Set(o.allTransactions.filter(t => t.type === 'Investment').map(t => t.isin))];
+    o.folio = [...new Set(o.allTransactions.map(t => t.folio))];
+
     for (const ef of o.existingFunds) {
       invested += ef.units * ef.price;
       units += ef.units;
@@ -106,6 +139,16 @@ const getPortfolio = async (
       ef.currentValue = o.latestPrice ? ef.units * o.latestPrice : 0;
       ef.profit = ef.currentValue - ef.invested;
       ef.gain = (ef.profit / ef.invested) * 100;
+      ef.daysHeld = TaxRules.holdingDays(ef.date, today);
+      ef.capitalGainType = TaxRules.capitalGainType(ef.date, o.fundType, today);
+
+      if (ef.capitalGainType === 'LTCG') {
+        o.ltcgGain += ef.profit;
+        o.ltValue += ef.currentValue;
+      } else {
+        o.stcgGain += ef.profit;
+        o.stValue += ef.currentValue;
+      }
     }
     o.currentInvested = Math.round(invested / 10000000);
     o.currentUnits = units > 0.00001 ? units / 1000 : 0;

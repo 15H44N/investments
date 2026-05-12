@@ -1,4 +1,5 @@
 import type { ComparisonResult, SummaryData } from '../utils/parser/types'
+import type { CapitalGainType, FundType } from '../utils/tax/TaxRules'
 
 export interface InvestmentsData {
   meta: Meta
@@ -62,6 +63,15 @@ export interface PortfolioRow {
   profit: number
   color: string
   percentage: number
+  // Enriched fields
+  isin: string[]
+  folio: string[]
+  fundType: FundType
+  isDirectPlan: boolean
+  ltcgGain: number
+  stcgGain: number
+  ltValue: number
+  stValue: number
 }
 
 export interface ExistingFund {
@@ -72,4 +82,7 @@ export interface ExistingFund {
   currentValue: number
   profit: number
   gain: number
+  // Enriched fields
+  capitalGainType: CapitalGainType
+  daysHeld: number
 }

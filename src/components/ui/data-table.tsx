@@ -42,12 +42,9 @@ interface DataTableProps<TData, TValue> {
   renderSubComponent?: (props: { rowData: TData }) => React.ReactElement;
   showCollapsableRows?: boolean;
   showColumnHiding?: boolean;
-  footer?: {
-    value: string | number;
-    colSpan: number;
-    align?: "right" | "left";
-    render?: () => React.ReactNode;
-  }[];
+  initialColumnVisibility?: Record<string, boolean>;
+  /** Passed to useReactTable as `meta` — accessible in column footer/cell renderers via `table.options.meta`. */
+  meta?: Record<string, unknown>;
 }
 
 export function DataTable<TData, TValue>({
@@ -58,10 +55,11 @@ export function DataTable<TData, TValue>({
   renderSubComponent,
   showCollapsableRows,
   showColumnHiding,
-  footer,
+  initialColumnVisibility,
+  meta,
 }: DataTableProps<TData, TValue>) {
   const [sorting, setSorting] = useState<SortingState>([]);
-  const [columnVisibility, setColumnVisibility] = useState({});
+  const [columnVisibility, setColumnVisibility] = useState<Record<string, boolean>>(initialColumnVisibility ?? {});
   const [expanded, setExpanded] = useState<ExpandedState>({});
 
   const table = useReactTable({
@@ -71,6 +69,7 @@ export function DataTable<TData, TValue>({
           {
             id: "expander",
             header: () => null,
+            footer: () => null,
             cell: ({ row }) => (
               <button
                 onClick={() => row.toggleExpanded()}
@@ -96,7 +95,11 @@ export function DataTable<TData, TValue>({
       columnVisibility,
       expanded,
     },
+    meta,
   });
+
+  // Only render <TableFooter> when at least one user column defines a footer renderer
+  const hasFooter = columns.some((col) => col.footer != null);
 
   return (
     <div>
@@ -200,17 +203,22 @@ export function DataTable<TData, TValue>({
               </TableRow>
             )}
           </TableBody>
-          {footer?.length && (
+          {hasFooter && (
             <TableFooter>
-              <TableRow>
-                {footer.map((f) => (
-                  <TableCell key={f.value} colSpan={f.colSpan}>
-                    <div className={f.align === "right" ? "text-right" : ""}>
-                      {f.render ? f.render() : f.value}
-                    </div>
-                  </TableCell>
-                ))}
-              </TableRow>
+              {table.getFooterGroups().map((footerGroup) => (
+                <TableRow key={footerGroup.id}>
+                  {footerGroup.headers.map((header) => (
+                    <TableCell key={header.id}>
+                      {header.isPlaceholder
+                        ? null
+                        : flexRender(
+                            header.column.columnDef.footer,
+                            header.getContext(),
+                          )}
+                    </TableCell>
+                  ))}
+                </TableRow>
+              ))}
             </TableFooter>
           )}
         </Table>
