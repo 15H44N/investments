@@ -87,7 +87,7 @@ describe('CASParser.parseTransactions', () => {
     const logger = new AuditLogger()
     new CASParser(logger).parseTransactions(makeLines(), MOCK_SCHEMES)
     const events = logger.getEvents()
-    expect(events.some(e => e.phase === 'isin-lookup' && e.message === 'ISIN matched')).toBe(true)
+    expect(events.some(e => e.phase === 'isin-lookup' && e.message.startsWith('ISIN matched:'))).toBe(true)
   })
 
   it('emits transaction-parse events', () => {

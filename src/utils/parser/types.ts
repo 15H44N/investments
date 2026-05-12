@@ -23,8 +23,10 @@ export interface AuditEvent {
 export interface ComparisonResult {
   fundHouse: string
   camsInvested: number
-  computed: number
-  diff: number
+  grossInvested: number
+  grossRedeemed: number
+  computed: number   // grossInvested - grossRedeemed
+  diff: number       // computed - camsInvested
   diffPercent: number
 }
 

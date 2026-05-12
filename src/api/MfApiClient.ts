@@ -1,5 +1,5 @@
-import { MfScheme } from '@/types/investments'
-import { NavResponse } from '@/utils/db'
+import type { MfScheme } from '../types/investments'
+import type { NavResponse } from '../utils/db'
 
 const BASE = 'https://api.mfapi.in/mf'
 

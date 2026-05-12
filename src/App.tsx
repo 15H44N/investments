@@ -26,6 +26,9 @@ import {
   Portfolio as PortfolioType,
   Meta,
 } from "@/types/investments";
+import { createLogger } from "@/logging/logger";
+
+const appLogger = createLogger('app')
 
 const TransactionsGuard = ({
   transactions,
@@ -100,7 +103,11 @@ function App() {
     readData();
   }, []);
 
-  console.log(realisedProfitByDate);
+  useEffect(() => {
+    appLogger.debug('Derived realised profit state updated', {
+      entries: realisedProfitByDate.length,
+    })
+  }, [realisedProfitByDate])
 
   return (
     <ThemeProvider defaultTheme="dark" storageKey="vite-ui-theme">

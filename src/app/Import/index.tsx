@@ -13,9 +13,9 @@ import { useToast } from '@/hooks/use-toast'
 import { ToastAction } from '@/components/ui/toast'
 import { useNavigate } from 'react-router-dom'
 
-import { CASParser } from '@/utils/parser/CASParser'
 import { AuditLogger } from '@/utils/parser/AuditLogger'
-import { textUtils } from '@/utils/parser/text-utils'
+import { normalizeExtractedText, textUtils } from '@/utils/parser/text-utils'
+import { finalizeParseError, runParsePipeline } from '@/utils/parser/runParsePipeline'
 import { AuditEvent, AuditLevel, ParseSession } from '@/utils/parser/types'
 import { InvestmentsRepository } from '@/repositories/InvestmentsRepository'
 import { ParseSessionRepository } from '@/repositories/ParseSessionRepository'
@@ -23,12 +23,14 @@ import { SchemeListRepository } from '@/repositories/SchemeListRepository'
 import { NavHistoryRepository } from '@/repositories/NavHistoryRepository'
 import { MfApiClient } from '@/api/MfApiClient'
 import { MfApiService } from '@/api/MfApiService'
+import { createLogger } from '@/logging/logger'
 
 GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${version}/build/pdf.worker.min.mjs`
 
 const investmentsRepo = new InvestmentsRepository()
 const sessionRepo = new ParseSessionRepository()
 const mfService = new MfApiService(new MfApiClient(), new SchemeListRepository(), new NavHistoryRepository())
+const importLogger = createLogger('import')
 
 const LINE_COLORS: Record<string, string> = {
   info: 'text-foreground',
@@ -50,6 +52,17 @@ const PHASE_LABELS: Record<string, string> = {
 
 function formatTs(iso: string): string {
   return format(new Date(iso), 'HH:mm:ss.SSS')
+}
+
+// Phases where the message is sparse — show data inline
+const VERBOSE_DATA_PHASES = new Set(['text-filter', 'meta', 'holder', 'summary', 'session', 'comparison'])
+
+function formatEventData(phase: string, data: Record<string, unknown> | undefined): string {
+  if (!data || !VERBOSE_DATA_PHASES.has(phase)) return ''
+  const parts = Object.entries(data)
+    .filter(([, v]) => v !== undefined && v !== null && v !== '')
+    .map(([k, v]) => `${k}=${typeof v === 'object' ? JSON.stringify(v) : v}`)
+  return parts.length > 0 ? '  · ' + parts.join('  ') : ''
 }
 
 function formatAmount(n: number): string {
@@ -95,10 +108,12 @@ export default function Import({ readData }: { readData: () => void }) {
       await getDocument({ url: blobUrl }).promise
       setIsPasswordProtected(false)
       setPassword('')
+      importLogger.info('PDF is not password protected', { fileName: file.name })
     } catch (err) {
       if (err instanceof Error && err.name === 'PasswordException') {
         setIsPasswordProtected(true)
         setPassword('')
+        importLogger.info('PDF requires a password', { fileName: file.name })
       }
     } finally {
       URL.revokeObjectURL(blobUrl)
@@ -115,6 +130,10 @@ export default function Import({ readData }: { readData: () => void }) {
     }
     setSelectedFile(file)
     setError('')
+    importLogger.info('Selected PDF for import', {
+      fileName: file.name,
+      sizeBytes: file.size,
+    })
     checkIfPasswordProtected(file)
   }
 
@@ -123,6 +142,9 @@ export default function Import({ readData }: { readData: () => void }) {
     setIsProcessing(true)
     setError('')
     const logger = new AuditLogger()
+    importLogger.info('Starting CAS import', {
+      fileName: selectedFile.name,
+    })
 
     try {
       // Step 1: Extract text from PDF
@@ -148,48 +170,39 @@ export default function Import({ readData }: { readData: () => void }) {
       }
       URL.revokeObjectURL(blobUrl)
 
-      text = text.split('\n').map(l => l.trim()).join('\n')
+      text = normalizeExtractedText(text)
 
-      // Step 2: Filter text
-      setProcessingStatus('Filtering PDF text...')
-      const parser = new CASParser(logger)
-      const filteredText = parser.filterText(text)
-
-      // Step 3: Fetch scheme list (cache-first)
+      // Step 2: Fetch scheme list (cache-first)
       setProcessingStatus('Fetching scheme list...')
       const schemes = await mfService.getSchemes()
 
-      // Step 4: Parse
+      // Step 3: Parse
       setProcessingStatus('Parsing transactions...')
-      const data = parser.parse(filteredText, schemes)
+      const { data, session } = runParsePipeline(text, schemes, {
+        logger,
+        totalPages: numPages,
+      })
 
-      // Step 5: Save investments data
+      // Step 4: Save investments data
       investmentsRepo.save(data)
 
-      // Step 6: Finalize and save session
-      const comparison = (data as unknown as { comparison: ParseSession['comparison'] }).comparison
-      const session = logger.finalize('success', {
-        holderName: data.holder.name,
-        stats: {
-          totalTransactions: data.transactions.length,
-          totalFunds: new Set(data.transactions.map(t => t.mfName)).size,
-          totalFolios: new Set(data.transactions.map(t => t.folio)).size,
-          totalPages: numPages,
-          dateRange: { from: data.meta.from, to: data.meta.to },
-        },
-        comparison,
-      })
+      // Step 5: Save session
       sessionRepo.save(session)
       const updated = sessionRepo.getAll()
       setSessions(updated)
       setSelectedSession(updated[0])
 
-      // Step 7: Trigger app data refresh
+      // Step 6: Trigger app data refresh
       readData()
 
-      // Step 8: Pre-fetch NAV history in background
+      // Step 7: Pre-fetch NAV history in background
       const schemeCodes = [...new Set(data.transactions.map(t => t.matchingScheme.schemeCode))]
-      mfService.prefetchNavHistory(schemeCodes).catch(console.error)
+      mfService.prefetchNavHistory(schemeCodes).catch(error => {
+        importLogger.error('NAV prefetch failed', {
+          schemeCodes: schemeCodes.length,
+          error: error instanceof Error ? error.message : String(error),
+        })
+      })
 
       setProcessingStatus('')
       setHasData(true)
@@ -208,12 +221,20 @@ export default function Import({ readData }: { readData: () => void }) {
           </ToastAction>
         ),
       })
+      importLogger.info('CAS import completed', {
+        transactions: data.transactions.length,
+        folios: new Set(data.transactions.map(tx => tx.folio)).size,
+      })
     } catch (err) {
       const message = err instanceof Error ? err.message : 'An error occurred while processing the file.'
       const isPasswordError = err instanceof Error && err.name === 'PasswordException'
       setError(isPasswordError ? 'Invalid password. Please try again.' : message)
+      importLogger.error('CAS import failed', {
+        fileName: selectedFile.name,
+        error: message,
+      })
 
-      const session = logger.finalize('error', { errorMessage: message })
+      const session = finalizeParseError(logger, message)
       sessionRepo.save(session)
       const updated = sessionRepo.getAll()
       setSessions(updated)
@@ -228,6 +249,7 @@ export default function Import({ readData }: { readData: () => void }) {
     sessionRepo.clearAll()
     setSessions([])
     setSelectedSession(null)
+    importLogger.info('Cleared stored parse sessions')
   }
 
   const handleDeleteData = () => {
@@ -235,6 +257,7 @@ export default function Import({ readData }: { readData: () => void }) {
     setHasData(false)
     readData()
     toast({ title: 'Data cleared', description: 'All imported data has been removed.' })
+    importLogger.warn('Deleted imported investment data')
   }
 
   const filteredEvents: AuditEvent[] = selectedSession
@@ -369,6 +392,9 @@ export default function Import({ readData }: { readData: () => void }) {
             <Card>
               <CardHeader>
                 <CardTitle className="text-base">Summary Comparison</CardTitle>
+                <p className="text-xs text-muted-foreground mt-1">
+                  CAMS Cost Basis vs parsed transactions. Diff = fund switches (switch-in cost basis includes unrealized gains from switched fund).
+                </p>
               </CardHeader>
               <CardContent className="p-0">
                 <div className="overflow-x-auto">
@@ -376,8 +402,10 @@ export default function Import({ readData }: { readData: () => void }) {
                     <thead>
                       <tr className="border-b bg-muted/50">
                         <th className="text-left px-4 py-2 font-medium">Fund House</th>
-                        <th className="text-right px-4 py-2 font-medium">CAMS Cost</th>
-                        <th className="text-right px-4 py-2 font-medium">Computed</th>
+                        <th className="text-right px-4 py-2 font-medium">CAMS Cost Basis</th>
+                        <th className="text-right px-4 py-2 font-medium">Purchased</th>
+                        <th className="text-right px-4 py-2 font-medium">Redeemed</th>
+                        <th className="text-right px-4 py-2 font-medium">Net</th>
                         <th className="text-right px-4 py-2 font-medium">Diff</th>
                       </tr>
                     </thead>
@@ -386,6 +414,10 @@ export default function Import({ readData }: { readData: () => void }) {
                         <tr key={row.fundHouse}>
                           <td className="px-4 py-2 text-muted-foreground">{row.fundHouse}</td>
                           <td className="px-4 py-2 text-right tabular-nums">{formatAmount(row.camsInvested)}</td>
+                          <td className="px-4 py-2 text-right tabular-nums">{formatAmount(row.grossInvested)}</td>
+                          <td className="px-4 py-2 text-right tabular-nums text-muted-foreground">
+                            {row.grossRedeemed > 0 ? `−${formatAmount(row.grossRedeemed)}` : '—'}
+                          </td>
                           <td className="px-4 py-2 text-right tabular-nums">{formatAmount(row.computed)}</td>
                           <td className="px-4 py-2 text-right tabular-nums">
                             <DiffCell diff={row.diff} diffPercent={row.diffPercent} />
@@ -434,7 +466,7 @@ export default function Import({ readData }: { readData: () => void }) {
                       const ts = formatTs(event.timestamp)
                       return (
                         <span key={event.id} className={LINE_COLORS[event.level]}>
-                          {`${ts}  ${level}  ${phase}  ${event.message}\n`}
+                          {`${ts}  ${level}  ${phase}  ${event.message}${formatEventData(event.phase, event.data)}\n`}
                         </span>
                       )
                     })}

@@ -28,7 +28,7 @@ export default function Cards({ portfolio }: { portfolio: Portfolio }) {
   return (
     <div className="grid auto-rows-min gap-4 xl:grid-cols-4 md:grid-cols-2 sm:grid-cols-1">
       {cards.map(({ title, value }) =>
-        <Card>
+        <Card key={title}>
           <CardHeader>
             <CardTitle>
               {title}

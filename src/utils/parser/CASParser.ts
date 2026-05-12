@@ -1,6 +1,6 @@
-import { InvestmentsData, Meta, Holder, MfScheme, Transaction } from '@/types/investments'
+import type { Holder, InvestmentsData, Meta, MfScheme, Transaction } from '../../types/investments'
 import { AuditLogger } from './AuditLogger'
-import { ComparisonResult, SummaryData } from './types'
+import type { ComparisonResult, SummaryData } from './types'
 import { strToCur, strToPrice, strToUnits, MONTHS } from './string-converters'
 import { textUtils } from './text-utils'
 
@@ -225,6 +225,11 @@ export class CASParser {
         const stampDuty = strToPrice((line as string).split(' ')[1])
         const amount = strToPrice((filteredLines[index - 1] as string).split(' ')[1])
 
+        if (isNaN(stampDuty) || isNaN(amount)) {
+          this.logger.warn('transaction-parse', `Stamp duty skipped (parse error) — stampDuty=${stampDuty} amount=${amount}`, { line: line as string })
+          return
+        }
+
         filteredLines[index - 1] = (filteredLines[index - 1] as string).split(' ')
         ;(filteredLines[index - 1] as unknown as string[])[1] = (amount + stampDuty).toFixed(2)
         filteredLines[index - 1] = (filteredLines[index - 1] as unknown as string[]).join(' ')
@@ -268,7 +273,7 @@ export class CASParser {
           throw new Error(`No matching scheme found for ISIN: ${isin}`)
         }
 
-        this.logger.info('isin-lookup', 'ISIN matched', {
+        this.logger.info('isin-lookup', `ISIN matched: ${isin} → ${matchingScheme.schemeName} [${matchingScheme.schemeCode}]`, {
           isin,
           schemeCode: matchingScheme.schemeCode,
           schemeName: matchingScheme.schemeName,
@@ -334,7 +339,11 @@ export class CASParser {
             key: index,
           } as Transaction
 
-          if (!isNaN(amount)) {
+          if (isNaN(amount)) {
+            this.logger.warn('transaction-parse', `NaN amount skipped — raw line: ${line}`, { line, folio, mfName })
+          } else if (amount === 0) {
+            this.logger.warn('transaction-parse', `Zero amount (possible parse error) — raw line: ${line}`, { line, folio, mfName })
+          } else {
             const tx = filteredLines[index] as Transaction
             const sign = type === 'Redemption' ? '-' : '+'
             this.logger.info('transaction-parse', `${tx.date.slice(0, 10)}  ${sign}₹${amount.toLocaleString('en-IN')}  ${units} units @ ₹${tx.price}  ${mfName}`, {
@@ -350,12 +359,10 @@ export class CASParser {
     })
 
     const transactions = (filteredLines as Transaction[]).filter(line => typeof line !== 'string')
-    const valid = transactions.filter(tx => !isNaN(tx.amount))
-    const nanCount = transactions.length - valid.length
+    const valid = transactions.filter(tx => !isNaN(tx.amount) && tx.amount !== 0)
 
-    if (nanCount > 0) {
-      this.logger.warn('transaction-parse', `${nanCount} transaction(s) skipped due to NaN amount`)
-    }
+    const skipped = transactions.length - valid.length
+    this.logger.info('transaction-parse', `Parsed ${valid.length} transactions${skipped > 0 ? ` (${skipped} skipped)` : ''}`, { total: transactions.length, valid: valid.length, skipped })
 
     return valid
   }
@@ -363,20 +370,29 @@ export class CASParser {
   compareSummaryVsTransactions(summary: SummaryData, transactions: Transaction[]): ComparisonResult[] {
     const fundHouseNames = summary.mutualFunds.map(mf => mf.fundHouse)
 
-    const computedByHouse: Record<string, number> = {}
+    const grossByHouse: Record<string, { invested: number; redeemed: number }> = {}
 
     for (const tx of transactions) {
+      // Primary: match by first word of scheme name (e.g. "HDFC" → "HDFC Mutual Fund")
+      // Fallback: match by first word of mfHouse code (e.g. "PP" → "PPFAS Mutual Fund")
       const fundHouse =
-        fundHouseNames.find(fh => fh === tx.mfHouse) ??
+        fundHouseNames.find(fh => fh.toLowerCase().startsWith(tx.mfNameFull.split(' ')[0].toLowerCase())) ??
         fundHouseNames.find(fh => fh.toLowerCase().startsWith(tx.mfHouse.split(' ')[0].toLowerCase())) ??
-        tx.mfHouse
+        tx.mfNameFull.split(' ')[0]
 
-      computedByHouse[fundHouse] = (computedByHouse[fundHouse] ?? 0) +
-        (tx.type === 'Investment' ? tx.amount : -tx.amount)
+      if (!grossByHouse[fundHouse]) grossByHouse[fundHouse] = { invested: 0, redeemed: 0 }
+      if (tx.type === 'Investment') {
+        grossByHouse[fundHouse].invested += tx.amount
+      } else {
+        grossByHouse[fundHouse].redeemed += tx.amount
+      }
     }
 
     return summary.mutualFunds.map(mf => {
-      const computed = Math.round((computedByHouse[mf.fundHouse] ?? 0) * 100) / 100
+      const g = grossByHouse[mf.fundHouse] ?? { invested: 0, redeemed: 0 }
+      const grossInvested = Math.round(g.invested * 100) / 100
+      const grossRedeemed = Math.round(g.redeemed * 100) / 100
+      const computed = Math.round((grossInvested - grossRedeemed) * 100) / 100
       const diff = Math.round((computed - mf.invested) * 100) / 100
       const diffPercent = mf.invested !== 0 ? Math.round((diff / mf.invested) * 10000) / 100 : 0
 
@@ -388,7 +404,7 @@ export class CASParser {
         { fundHouse: mf.fundHouse, camsInvested: mf.invested, computed, diff, diffPercent },
       )
 
-      return { fundHouse: mf.fundHouse, camsInvested: mf.invested, computed, diff, diffPercent }
+      return { fundHouse: mf.fundHouse, camsInvested: mf.invested, grossInvested, grossRedeemed, computed, diff, diffPercent }
     })
   }
 
@@ -411,6 +427,6 @@ export class CASParser {
       duration,
     })
 
-    return { meta, holder, summary, transactions, comparison } as unknown as InvestmentsData
+    return { meta, holder, summary, transactions, comparison }
   }
 }

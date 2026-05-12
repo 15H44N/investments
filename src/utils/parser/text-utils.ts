@@ -4,3 +4,7 @@ export const textUtils = {
   excludeLinesThatInclude: (lines: string[], text: string) => lines.filter(line => !line.includes(text)),
   excludeLinesThatStartWith: (lines: string[], text: string) => lines.filter(line => !line.startsWith(text)),
 }
+
+export function normalizeExtractedText(text: string): string {
+  return text.split('\n').map(line => line.trim()).join('\n')
+}

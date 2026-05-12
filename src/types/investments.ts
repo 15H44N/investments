@@ -1,8 +1,11 @@
+import type { ComparisonResult, SummaryData } from '../utils/parser/types'
+
 export interface InvestmentsData {
   meta: Meta
   holder: Holder
-  summary: unknown
+  summary: SummaryData
   transactions: Transaction[]
+  comparison: ComparisonResult[]
 }
 
 export interface Meta {

@@ -1,4 +1,5 @@
 import { AuditEvent, AuditLevel, AuditPhase, ComparisonResult, ParseSession, ParseSessionStats } from './types'
+import { createLogger, Logger } from '@/logging/logger'
 
 export class AuditLogger {
   private events: AuditEvent[] = []
@@ -6,7 +7,11 @@ export class AuditLogger {
   readonly sessionId: string
   readonly startedAt: string
 
-  constructor() {
+  constructor(
+    private sink: Logger | null = typeof window === 'undefined'
+      ? null
+      : createLogger('parser'),
+  ) {
     this.sessionId = crypto.randomUUID()
     this.startedAt = new Date().toISOString()
   }
@@ -21,6 +26,24 @@ export class AuditLogger {
       page,
       data,
     })
+
+    const context = {
+      phase,
+      page,
+      ...data,
+    }
+
+    if (level === 'warn') {
+      this.sink?.warn(message, context)
+      return
+    }
+
+    if (level === 'error') {
+      this.sink?.error(message, context)
+      return
+    }
+
+    this.sink?.info(message, context)
   }
 
   info(phase: AuditPhase, message: string, data?: Record<string, unknown>, page?: number): void {

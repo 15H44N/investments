@@ -1,3 +1,4 @@
+import React from "react";
 import {
   ColumnDef,
   flexRender,
@@ -164,9 +165,8 @@ export function DataTable<TData, TValue>({
           <TableBody>
             {table.getRowModel().rows?.length ? (
               table.getRowModel().rows.map((row) => (
-                <>
+                <React.Fragment key={row.id}>
                   <TableRow
-                    key={row.id}
                     data-state={row.getIsSelected() && "selected"}
                   >
                     {row.getVisibleCells().map((cell) => (
@@ -187,7 +187,7 @@ export function DataTable<TData, TValue>({
                         </TableCell>
                       </TableRow>
                     )}
-                </>
+                </React.Fragment>
               ))
             ) : (
               <TableRow>
