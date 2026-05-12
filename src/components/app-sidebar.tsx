@@ -6,6 +6,7 @@ import {
   LayoutDashboard,
   Github,
   IndianRupee,
+  Upload,
 } from "lucide-react";
 
 import { NavMain } from "@/components/nav-main";
@@ -23,6 +24,11 @@ import { Link } from "react-router-dom";
 // This is sample data.
 const data = {
   navMain: [
+    {
+      title: "Import",
+      url: "/import",
+      icon: Upload,
+    },
     {
       title: "Dashboard",
       url: "/",

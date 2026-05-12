@@ -28,6 +28,8 @@ export default function BaseLayout({
     switch (path) {
       case "/":
         return "Dashboard";
+      case "/import":
+        return "Import";
       case "/settings":
         return "Settings";
       case "/transactions":

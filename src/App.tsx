@@ -4,6 +4,7 @@ import { Routes, Route, useNavigate } from "react-router-dom";
 import { ThemeProvider } from "@/components/theme-provider";
 
 import Settings from "@/app/Settings";
+import Import from "@/app/Import";
 import Dashboard from "@/app/Dashboard";
 import Portfolio from "@/app/Portfolio";
 import Transactions from "@/app/Transactions";
@@ -12,6 +13,7 @@ import TaxAnalysis from "@/app/TaxAnalysis";
 import BaseLayout from "@/layouts/BaseLayout";
 
 import { fetchNavHistory } from "@/utils/nav-fetcher";
+import { InvestmentsRepository } from "@/repositories/InvestmentsRepository";
 
 import getPortfolio, { RealisedProfitEntry } from "@/utils/get-portfolio";
 import { Button } from "@/components/ui/button";
@@ -46,7 +48,7 @@ const TransactionsGuard = ({
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-4 p-4">
         <TypographySmall text="No transactions found. Please import your CAS first." />
-        <Button onClick={() => navigate("/settings")}>Go to Import</Button>
+        <Button onClick={() => navigate("/import")}>Go to Import</Button>
       </div>
     );
   }
@@ -72,12 +74,11 @@ function App() {
   const readData = async () => {
     setIsLoading(true);
     await fetchNavHistory();
-    const data = localStorage.getItem("investmentsData");
+    const parsedData = new InvestmentsRepository().get();
 
-    if (data) {
-      const parsedData = JSON.parse(data) as InvestmentsData;
-      setMeta(parsedData.meta);
-      const sortedTransactions = [...parsedData.transactions].sort(
+    if (parsedData) {
+      setMeta(parsedData!.meta);
+      const sortedTransactions = [...parsedData!.transactions].sort(
         (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime(),
       );
       setTransactions(sortedTransactions);
@@ -151,15 +152,11 @@ function App() {
             }
           />
 
+          <Route path="/settings" element={<Settings />} />
+
           <Route
-            path="/settings"
-            element={
-              <Settings
-                meta={meta}
-                readData={readData}
-                transactions={transactions}
-              />
-            }
+            path="/import"
+            element={<Import readData={readData} />}
           />
         </Routes>
       </BaseLayout>

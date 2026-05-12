@@ -20,6 +20,7 @@ export interface Holder {
 
 export interface Transaction {
   mfNameFull: string
+  mfHouse: string
   isin: string
   matchingScheme: MatchingScheme
   mfName: string
@@ -37,8 +38,11 @@ export interface MatchingScheme {
   schemeCode: number
   schemeName: string
   isinGrowth: string
-  isinDivReinvestment: unknown
+  isinDivReinvestment: string | null
 }
+
+/** Raw entry from https://api.mfapi.in/mf */
+export type MfScheme = MatchingScheme
 
 export type Portfolio = PortfolioRow[]
 

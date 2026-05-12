@@ -1,7 +1,10 @@
 import { openDB, IDBPDatabase } from 'idb'
 
-const dbName = 'mf-tracker'
-const navStoreKey = 'nav-history'
+const DB_NAME = 'mf-tracker'
+const DB_VERSION = 2
+
+export const STORE_NAV_HISTORY = 'nav-history'
+export const STORE_SCHEMES = 'scheme-list'
 
 interface NavMeta {
   fund_house: string
@@ -18,26 +21,33 @@ interface NavDataPoint {
   nav: string
 }
 
-interface NavResponse {
+export interface NavResponse {
   meta: NavMeta
   data: NavDataPoint[]
   status: string
 }
 
-interface NavData {
+export interface NavData {
   data: NavResponse
+  timestamp: number
+}
+
+export interface SchemeListData {
+  schemes: unknown[]
   timestamp: number
 }
 
 let db: IDBPDatabase | null = null
 
-const initDB = async () => {
+export const getDB = async (): Promise<IDBPDatabase> => {
   if (!db) {
-    db = await openDB(dbName, 1, {
-      upgrade(db) {
-        // Create a store for NAV history if it doesn't exist
-        if (!db.objectStoreNames.contains(navStoreKey)) {
-          db.createObjectStore(navStoreKey)
+    db = await openDB(DB_NAME, DB_VERSION, {
+      upgrade(database, oldVersion) {
+        if (oldVersion < 1) {
+          database.createObjectStore(STORE_NAV_HISTORY)
+        }
+        if (oldVersion < 2) {
+          database.createObjectStore(STORE_SCHEMES)
         }
       },
     })
@@ -45,28 +55,26 @@ const initDB = async () => {
   return db
 }
 
+// Legacy export kept for nav-fetcher.ts and get-portfolio.tsx compatibility
 export const navHistoryDB = {
   async get(schemeCode: number) {
-    const database = await initDB()
-    return database.get(navStoreKey, schemeCode) as Promise<NavData | undefined>
+    const database = await getDB()
+    return database.get(STORE_NAV_HISTORY, schemeCode) as Promise<NavData | undefined>
   },
 
   async set(schemeCode: number, data: NavResponse) {
-    const database = await initDB()
-    const navData: NavData = {
-      data,
-      timestamp: Date.now()
-    }
-    return database.put(navStoreKey, navData, schemeCode)
+    const database = await getDB()
+    const navData: NavData = { data, timestamp: Date.now() }
+    return database.put(STORE_NAV_HISTORY, navData, schemeCode)
   },
 
   async getAll() {
-    const database = await initDB()
-    return database.getAll(navStoreKey) as Promise<NavData[]>
+    const database = await getDB()
+    return database.getAll(STORE_NAV_HISTORY) as Promise<NavData[]>
   },
 
   async clear() {
-    const database = await initDB()
-    return database.clear(navStoreKey)
-  }
+    const database = await getDB()
+    return database.clear(STORE_NAV_HISTORY)
+  },
 }
